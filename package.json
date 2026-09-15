@@ -1,0 +1,10 @@
+{
+  "name": "voice-tracker",
+  "version": "1.0.0",
+  "main": "index.js",
+  "dependencies": {
+    "@discordjs/voice": "^0.19.2",
+    "discord.js": "^14.27.0",
+    "express": "^4.19.2"
+  }
+}
