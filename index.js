@@ -14,7 +14,6 @@ const client = new Client({
 });
 
 const activeCalls = new Map();
-let logoutTimeout = null;
 
 function formatDuration(totalDurationMs) {
   const totalSeconds = Math.max(0, Math.floor(totalDurationMs / 1000));
@@ -52,7 +51,7 @@ function updateChannelSession(channel) {
   const humanMemberCount = channel.members.filter((member) => !member.user.bot).size;
   const channelId = channel.id;
 
-  // The bot ONLY joins if there is AT LEAST 1 real human inside
+  // 🟢 START CHRONO: The bot ONLY joins and starts from zero if a real human enters a fresh room
   if (humanMemberCount > 0 && !activeCalls.has(channelId)) {
     activeCalls.set(channelId, Date.now());
     console.log(`[TRACKING] Active human detected. Starting session from zero in channel ${channelId}`);
@@ -64,35 +63,13 @@ function updateChannelSession(channel) {
       selfMute: true,
       selfDeaf: true
     });
-
-    if (logoutTimeout) {
-      clearTimeout(logoutTimeout);
-      logoutTimeout = null;
-    }
     return;
   }
 
-  // Someone returns before the 15-minute grace period expires
-  if (humanMemberCount > 0 && logoutTimeout) {
-    clearTimeout(logoutTimeout);
-    logoutTimeout = null;
-    console.log('[SHIELD] Connection restored in time.');
-  }
-
-  // Channel becomes completely empty (0 humans)
-  if (humanMemberCount === 0 && activeCalls.has(channelId) && !logoutTimeout) {
-    console.log('[WARNING] Channel empty. Starting 15 minutes grace period...');
-    logoutTimeout = setTimeout(() => {
-      const startTime = activeCalls.get(channelId);
-      activeCalls.delete(channelId);
-      logoutTimeout = null;
-      
-      console.log('[LOG] Grace period expired. Sending log and disconnecting bot.');
-      void logCompletedCall(channel, startTime);
-
-      const connection = getVoiceConnection(channel.guild.id);
-      if (connection) connection.destroy();
-    }, 15 * 60 * 1000); 
+  // ⛔ NO AUTO-DISCONNECT ON EMPTY: If humanMemberCount === 0, the bot does absolutely nothing.
+  // It will sit in the voice channel indefinitely, holding the line open for days if necessary.
+  if (humanMemberCount === 0 && activeCalls.has(channelId)) {
+    console.log(`[SHIELD ACTIVE] All humans left or disconnected. The bot is holding the room open indefinitely.`);
   }
 }
 
@@ -109,17 +86,15 @@ client.once('ready', async () => {
 });
 
 client.on('voiceStateUpdate', async (oldState, newState) => {
-  // 🟢 CRITICAL FIX: If the bot itself is kicked or disconnected manually, clear everything and STAY OUT
+  // 🔴 THE ONLY WAY TO KILL THE CALL: If the bot is manually kicked/disconnected via right-click
   if (oldState.member.id === client.user.id && oldState.channelId && !newState.channelId) {
-    console.log('[MANUAL KICK] The bot was disconnected manually. Resetting state and staying out.');
-    if (logoutTimeout) {
-      clearTimeout(logoutTimeout);
-      logoutTimeout = null;
-    }
+    console.log('[MANUAL KICK] The bot was disconnected via right-click. Finalizing log and resetting.');
+    
     const targetChannelId = process.env.VOICE_CHANNEL_ID;
     if (activeCalls.has(targetChannelId)) {
       const startTime = activeCalls.get(targetChannelId);
       activeCalls.delete(targetChannelId);
+      
       const channel = await client.channels.fetch(targetChannelId).catch(() => null);
       if (channel) {
         void logCompletedCall(channel, startTime);
