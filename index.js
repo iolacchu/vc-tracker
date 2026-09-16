@@ -52,7 +52,7 @@ function updateChannelSession(channel) {
   const humanMemberCount = channel.members.filter((member) => !member.user.bot).size;
   const channelId = channel.id;
 
-  // 🟢 FIXED: The bot ONLY triggers tracking AND joins if there is AT LEAST 1 real human inside
+  // The bot ONLY joins if there is AT LEAST 1 real human inside
   if (humanMemberCount > 0 && !activeCalls.has(channelId)) {
     activeCalls.set(channelId, Date.now());
     console.log(`[TRACKING] Active human detected. Starting session from zero in channel ${channelId}`);
@@ -99,38 +99,38 @@ function updateChannelSession(channel) {
 client.once('ready', async () => {
   console.log(`Bot online as ${client.user.tag}!`);
   
-  // ⛔ FIXED: Do NOT force any connection or session check when the bot boots up empty
   const channel = await client.channels.fetch(process.env.VOICE_CHANNEL_ID).catch(() => null);
   if (channel && channel.isVoiceBased()) {
     const humanMemberCount = channel.members.filter((member) => !member.user.bot).size;
-    // Only engage if humans are already talking when the bot restarts
     if (humanMemberCount > 0) {
       updateChannelSession(channel);
     }
   }
 });
 
-client.on('voiceStateUpdate', (oldState, newState) => {
+client.on('voiceStateUpdate', async (oldState, newState) => {
+  // 🟢 CRITICAL FIX: If the bot itself is kicked or disconnected manually, clear everything and STAY OUT
+  if (oldState.member.id === client.user.id && oldState.channelId && !newState.channelId) {
+    console.log('[MANUAL KICK] The bot was disconnected manually. Resetting state and staying out.');
+    if (logoutTimeout) {
+      clearTimeout(logoutTimeout);
+      logoutTimeout = null;
+    }
+    const targetChannelId = process.env.VOICE_CHANNEL_ID;
+    if (activeCalls.has(targetChannelId)) {
+      const startTime = activeCalls.get(targetChannelId);
+      activeCalls.delete(targetChannelId);
+      const channel = await client.channels.fetch(targetChannelId).catch(() => null);
+      if (channel) {
+        void logCompletedCall(channel, startTime);
+      }
+    }
+    return;
+  }
+
   const channel = oldState.channel || newState.channel;
   if (!channel || channel.id !== process.env.VOICE_CHANNEL_ID) return;
   updateChannelSession(channel);
-});
-
-// EMERGENCY DIRECT CHAT COMMAND
-client.on('messageCreate', async (message) => {
-  if (message.content === '!stopcall' && !message.author.bot) {
-    const vID = process.env.VOICE_CHANNEL_ID;
-    if (activeCalls.has(vID)) {
-      if (logoutTimeout) clearTimeout(logoutTimeout);
-      const startTime = activeCalls.get(vID);
-      const channel = await client.channels.fetch(vID);
-      activeCalls.delete(vID);
-      void logCompletedCall(channel, startTime);
-      message.reply("🏁 **Session ended manually! Final log sent.**");
-      const connection = getVoiceConnection(channel.guild.id);
-      if (connection) connection.destroy();
-    }
-  }
 });
 
 client.login(process.env.DISCORD_TOKEN);
