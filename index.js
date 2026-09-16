@@ -52,12 +52,11 @@ function updateChannelSession(channel) {
   const humanMemberCount = channel.members.filter((member) => !member.user.bot).size;
   const channelId = channel.id;
 
-  // 🟢 CRITICAL FIX: The bot ONLY joins when at least 1 human enters an unmonitored channel
+  // 🟢 FIXED: The bot ONLY triggers tracking AND joins if there is AT LEAST 1 real human inside
   if (humanMemberCount > 0 && !activeCalls.has(channelId)) {
     activeCalls.set(channelId, Date.now());
-    console.log(`[TRACKING] A human entered. Call started from zero in channel ${channelId}`);
+    console.log(`[TRACKING] Active human detected. Starting session from zero in channel ${channelId}`);
 
-    // Join the channel dynamically to act as a shield during the call
     joinVoiceChannel({
       channelId: channel.id,
       guildId: channel.guild.id,
@@ -91,7 +90,6 @@ function updateChannelSession(channel) {
       console.log('[LOG] Grace period expired. Sending log and disconnecting bot.');
       void logCompletedCall(channel, startTime);
 
-      // Disconnect the bot automatically when the call is officially dead
       const connection = getVoiceConnection(channel.guild.id);
       if (connection) connection.destroy();
     }, 15 * 60 * 1000); 
@@ -100,7 +98,16 @@ function updateChannelSession(channel) {
 
 client.once('ready', async () => {
   console.log(`Bot online as ${client.user.tag}!`);
-  // ⛔ NO FORCED CONNECTIONS AT STARTUP. The bot starts completely idle.
+  
+  // ⛔ FIXED: Do NOT force any connection or session check when the bot boots up empty
+  const channel = await client.channels.fetch(process.env.VOICE_CHANNEL_ID).catch(() => null);
+  if (channel && channel.isVoiceBased()) {
+    const humanMemberCount = channel.members.filter((member) => !member.user.bot).size;
+    // Only engage if humans are already talking when the bot restarts
+    if (humanMemberCount > 0) {
+      updateChannelSession(channel);
+    }
+  }
 });
 
 client.on('voiceStateUpdate', (oldState, newState) => {
