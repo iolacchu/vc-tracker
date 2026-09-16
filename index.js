@@ -1,5 +1,5 @@
 const { Client, GatewayIntentBits } = require('discord.js');
-const { joinVoiceChannel } = require('@discordjs/voice');
+const { joinVoiceChannel, getVoiceConnection } = require('@discordjs/voice');
 
 const berlinTimeZone = 'Europe/Berlin';
 const chennaiTimeZone = 'Asia/Kolkata';
@@ -48,30 +48,82 @@ async function logCompletedCall(channel, startTime) {
   ).catch((error) => console.error(error.message));
 }
 
-client.once('ready', async () => {
-  console.log(`Bot online come ${client.user.tag}!`);
-  try {
-    const channel = await client.channels.fetch(process.env.VOICE_CHANNEL_ID);
-    if (channel && channel.isVoiceBased()) {
-      
-      // FORZATURA DI EMERGENZA FISSA A 864 ORE E 50 MINUTI
-      const oreGiaPassateMs = ((864 * 60) + 50) * 60 * 1000; 
-      
-      // Inviamo direttamente il log definitivo nel canale di testo simulando la fine della chiamata
-      void logCompletedCall(channel, Date.now() - oreGiaPassateMs);
-      console.log(`[SUCCESSO] Log forzato delle 864 ore inviato su Discord!`);
+function updateChannelSession(channel) {
+  const humanMemberCount = channel.members.filter((member) => !member.user.bot).size;
+  const channelId = channel.id;
+
+  // 🟢 CRITICAL FIX: The bot ONLY joins when at least 1 human enters an unmonitored channel
+  if (humanMemberCount > 0 && !activeCalls.has(channelId)) {
+    activeCalls.set(channelId, Date.now());
+    console.log(`[TRACKING] A human entered. Call started from zero in channel ${channelId}`);
+
+    // Join the channel dynamically to act as a shield during the call
+    joinVoiceChannel({
+      channelId: channel.id,
+      guildId: channel.guild.id,
+      adapterCreator: channel.guild.voiceAdapterCreator,
+      selfMute: true,
+      selfDeaf: true
+    });
+
+    if (logoutTimeout) {
+      clearTimeout(logoutTimeout);
+      logoutTimeout = null;
     }
-  } catch (error) {
-    console.error(error.message);
+    return;
   }
+
+  // Someone returns before the 15-minute grace period expires
+  if (humanMemberCount > 0 && logoutTimeout) {
+    clearTimeout(logoutTimeout);
+    logoutTimeout = null;
+    console.log('[SHIELD] Connection restored in time.');
+  }
+
+  // Channel becomes completely empty (0 humans)
+  if (humanMemberCount === 0 && activeCalls.has(channelId) && !logoutTimeout) {
+    console.log('[WARNING] Channel empty. Starting 15 minutes grace period...');
+    logoutTimeout = setTimeout(() => {
+      const startTime = activeCalls.get(channelId);
+      activeCalls.delete(channelId);
+      logoutTimeout = null;
+      
+      console.log('[LOG] Grace period expired. Sending log and disconnecting bot.');
+      void logCompletedCall(channel, startTime);
+
+      // Disconnect the bot automatically when the call is officially dead
+      const connection = getVoiceConnection(channel.guild.id);
+      if (connection) connection.destroy();
+    }, 15 * 60 * 1000); 
+  }
+}
+
+client.once('ready', async () => {
+  console.log(`Bot online as ${client.user.tag}!`);
+  // ⛔ NO FORCED CONNECTIONS AT STARTUP. The bot starts completely idle.
 });
 
 client.on('voiceStateUpdate', (oldState, newState) => {
-  // Disattivato per il recupero forzato
+  const channel = oldState.channel || newState.channel;
+  if (!channel || channel.id !== process.env.VOICE_CHANNEL_ID) return;
+  updateChannelSession(channel);
 });
 
+// EMERGENCY DIRECT CHAT COMMAND
 client.on('messageCreate', async (message) => {
-  // Disattivato per il recupero forzato
+  if (message.content === '!stopcall' && !message.author.bot) {
+    const vID = process.env.VOICE_CHANNEL_ID;
+    if (activeCalls.has(vID)) {
+      if (logoutTimeout) clearTimeout(logoutTimeout);
+      const startTime = activeCalls.get(vID);
+      const channel = await client.channels.fetch(vID);
+      activeCalls.delete(vID);
+      void logCompletedCall(channel, startTime);
+      message.reply("🏁 **Session ended manually! Final log sent.**");
+      const connection = getVoiceConnection(channel.guild.id);
+      if (connection) connection.destroy();
+    }
+  }
 });
 
 client.login(process.env.DISCORD_TOKEN);
