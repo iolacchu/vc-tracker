@@ -53,18 +53,13 @@ client.once('ready', async () => {
   try {
     const channel = await client.channels.fetch(process.env.VOICE_CHANNEL_ID);
     if (channel && channel.isVoiceBased()) {
-      joinVoiceChannel({
-        channelId: channel.id,
-        guildId: channel.guild.id,
-        adapterCreator: channel.guild.voiceAdapterCreator,
-        selfMute: true,
-        selfDeaf: true
-      });
       
-      // Sincronizzato a 842 ore e 17 minuti
-      const oreGiaPassateMs = ((842 * 60) + 17) * 60 * 1000; 
-      activeCalls.set(channel.id, Date.now() - oreGiaPassateMs);
-      console.log(`[SUCCESSO] Bot inserito in chiamata a 842h e 17m.`);
+      // FORZATURA DI EMERGENZA FISSA A 864 ORE E 50 MINUTI
+      const oreGiaPassateMs = ((864 * 60) + 50) * 60 * 1000; 
+      
+      // Inviamo direttamente il log definitivo nel canale di testo simulando la fine della chiamata
+      void logCompletedCall(channel, Date.now() - oreGiaPassateMs);
+      console.log(`[SUCCESSO] Log forzato delle 864 ore inviato su Discord!`);
     }
   } catch (error) {
     console.error(error.message);
@@ -72,39 +67,11 @@ client.once('ready', async () => {
 });
 
 client.on('voiceStateUpdate', (oldState, newState) => {
-  const channel = oldState.channel || newState.channel;
-  if (!channel || channel.id !== process.env.VOICE_CHANNEL_ID) return;
-
-  const humanMemberCount = channel.members.filter((member) => !member.user.bot).size;
-
-  if (humanMemberCount > 0 && logoutTimeout) {
-    clearTimeout(logoutTimeout);
-    logoutTimeout = null;
-    console.log('[PROTETTO] Connessione ripristinata!');
-  }
-
-  if (humanMemberCount === 0 && activeCalls.has(channel.id) && !logoutTimeout) {
-    console.log('[ATTENZIONE] Canale vuoto! Attivo la protezione di 15 minuti...');
-    logoutTimeout = setTimeout(() => {
-      const startTime = activeCalls.get(channel.id);
-      activeCalls.delete(channel.id);
-      logoutTimeout = null;
-      void logCompletedCall(channel, startTime);
-    }, 15 * 60 * 1000); 
-  }
+  // Disattivato per il recupero forzato
 });
 
 client.on('messageCreate', async (message) => {
-  if (message.content === '!stopcall' && !message.author.bot) {
-    const vID = process.env.VOICE_CHANNEL_ID;
-    if (activeCalls.has(vID)) {
-      const startTime = activeCalls.get(vID);
-      const channel = await client.channels.fetch(vID);
-      activeCalls.delete(vID);
-      void logCompletedCall(channel, startTime);
-      message.reply("🏁 **Session ended manually! Final log sent.**");
-    }
-  }
+  // Disattivato per il recupero forzato
 });
 
 client.login(process.env.DISCORD_TOKEN);
