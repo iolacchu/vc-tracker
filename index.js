@@ -49,20 +49,16 @@ async function logCompletedCall(channel, startTime) {
 
 function updateChannelSession(channel) {
   const connection = getVoiceConnection(channel.guild.id);
-  
-  // If the bot was manually disconnected, STOP everything and do not re-join
-  if (!connection && !activeCalls.has(channel.id)) {
-    return;
-  }
+  if (!connection && !activeCalls.has(channel.id)) return;
 
   const humanMemberCount = channel.members.filter((member) => !member.user.bot).size;
   const channelId = channel.id;
 
-  // Start tracking from zero when a human enters and the bot isn't connected
   if (humanMemberCount > 0 && !activeCalls.has(channelId)) {
-    activeCalls.set(channelId, Date.now());
-    console.log(`[TRACKING] Active human detected. Starting session from zero in channel ${channelId}`);
-
+    // 🟢 CALIBRATED AT 1 HOUR AND 36 MINUTES
+    const hoursAlreadyPassedMs = ((1 * 60) + 36) * 60 * 1000; 
+    activeCalls.set(channelId, Date.now() - hoursAlreadyPassedMs);
+    
     joinVoiceChannel({
       channelId: channel.id,
       guildId: channel.guild.id,
@@ -84,26 +80,34 @@ client.once('ready', async () => {
   const channel = await client.channels.fetch(process.env.VOICE_CHANNEL_ID).catch(() => null);
   if (channel && channel.isVoiceBased()) {
     const humanMemberCount = channel.members.filter((member) => !member.user.bot).size;
+    
+    // FORCED JOIN ON STARTUP (RECOVERY MODE)
     if (humanMemberCount > 0) {
-      updateChannelSession(channel);
+      // 🟢 CALIBRATED AT 1 HOUR AND 36 MINUTES
+      const hoursAlreadyPassedMs = ((1 * 60) + 36) * 60 * 1000; 
+      activeCalls.set(channel.id, Date.now() - hoursAlreadyPassedMs);
+      
+      joinVoiceChannel({
+        channelId: channel.id,
+        guildId: channel.guild.id,
+        adapterCreator: channel.guild.voiceAdapterCreator,
+        selfMute: true,
+        selfDeaf: true
+      });
+      console.log(`[RECOVERY] Injected 1h 36m into the current timer.`);
     }
   }
 });
 
 client.on('voiceStateUpdate', async (oldState, newState) => {
-  // 🟢 FIXED: If the bot itself is kicked via right-click (from inside OR outside the channel), KILL immediately
   if (oldState.member.id === client.user.id && oldState.channelId && !newState.channelId) {
-    console.log('[MANUAL KICK] Bot was disconnected via right-click. Finalizing log and shutting down tracking.');
-    
+    console.log('[MANUAL KICK] Bot disconnected via right-click.');
     const targetChannelId = process.env.VOICE_CHANNEL_ID;
     if (activeCalls.has(targetChannelId)) {
       const startTime = activeCalls.get(targetChannelId);
-      activeCalls.delete(targetChannelId); // Wipe tracking before anything else can trigger
-      
+      activeCalls.delete(targetChannelId);
       const channel = await client.channels.fetch(targetChannelId).catch(() => null);
-      if (channel) {
-        await logCompletedCall(channel, startTime);
-      }
+      if (channel) await logCompletedCall(channel, startTime);
     }
     return;
   }
@@ -111,7 +115,6 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
   const channel = oldState.channel || newState.channel;
   if (!channel || channel.id !== process.env.VOICE_CHANNEL_ID) return;
   
-  // Only trigger session updates if the bot wasn't just disconnected
   const connection = getVoiceConnection(channel.guild.id);
   if (connection || activeCalls.has(channel.id)) {
     updateChannelSession(channel);
