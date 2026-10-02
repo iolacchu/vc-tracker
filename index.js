@@ -54,11 +54,11 @@ function updateChannelSession(channel) {
   const humanMemberCount = channel.members.filter((member) => !member.user.bot).size;
   const channelId = channel.id;
 
+  // 🟢 AUTOMATIC START FROM ZERO
   if (humanMemberCount > 0 && !activeCalls.has(channelId)) {
-    // 🟢 CALIBRATED AT 1 HOUR AND 36 MINUTES
-    const hoursAlreadyPassedMs = ((1 * 60) + 36) * 60 * 1000; 
-    activeCalls.set(channelId, Date.now() - hoursAlreadyPassedMs);
-    
+    activeCalls.set(channelId, Date.now());
+    console.log(`[TRACKING] Active human detected. Starting session from zero in channel ${channelId}`);
+
     joinVoiceChannel({
       channelId: channel.id,
       guildId: channel.guild.id,
@@ -80,21 +80,8 @@ client.once('ready', async () => {
   const channel = await client.channels.fetch(process.env.VOICE_CHANNEL_ID).catch(() => null);
   if (channel && channel.isVoiceBased()) {
     const humanMemberCount = channel.members.filter((member) => !member.user.bot).size;
-    
-    // FORCED JOIN ON STARTUP (RECOVERY MODE)
     if (humanMemberCount > 0) {
-      // 🟢 CALIBRATED AT 1 HOUR AND 36 MINUTES
-      const hoursAlreadyPassedMs = ((1 * 60) + 36) * 60 * 1000; 
-      activeCalls.set(channel.id, Date.now() - hoursAlreadyPassedMs);
-      
-      joinVoiceChannel({
-        channelId: channel.id,
-        guildId: channel.guild.id,
-        adapterCreator: channel.guild.voiceAdapterCreator,
-        selfMute: true,
-        selfDeaf: true
-      });
-      console.log(`[RECOVERY] Injected 1h 36m into the current timer.`);
+      updateChannelSession(channel);
     }
   }
 });
